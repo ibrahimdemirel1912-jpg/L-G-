@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus Futbol Ligi - Canlı Maç Merkezi</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        pitch: '#15803d',
+                        pitchDark: '#166534',
+                        brand: {
+                            dark: '#070b14',
+                            card: '#0f172a',
+                            accent: '#10b981',
+                            live: '#ef4444',
+                            gold: '#f59e0b'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @keyframes pulse-live {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.3; transform: scale(1.25); }
+        }
+        .live-dot { animation: pulse-live 1.2s infinite ease-in-out; }
+
+        .soccer-pitch {
+            background: repeating-linear-gradient(
+                90deg,
+                #15803d 0px,
+                #15803d 40px,
+                #166534 40px,
+                #166534 80px
+            );
+            position: relative;
+            box-shadow: inset 0 0 25px rgba(0,0,0,0.6);
+        }
+
+        .ball-point {
+            transition: all 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: #070b14; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col antialiased selection:bg-purple-500 selection:text-white">
+
+    <header class="sticky top-0 z-40 bg-slate-900/95 backdrop-blur border-b border-slate-800 shadow-2xl">
+        <div class="max-w-7xl mx-auto px-3 sm:px-6">
+            <div class="flex items-center justify-between h-16">
+                
+                <div class="flex items-center gap-3 cursor-pointer" onclick="switchTab('matches')">
+                    <div class="bg-gradient-to-tr from-amber-500 via-yellow-500 to-amber-700 text-slate-950 p-2.5 rounded-xl shadow-lg font-black">
+                        <i class="fa-solid fa-trophy text-xl"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-base sm:text-lg font-black tracking-tight text-white uppercase">NEXUS FUTBOL LİGİ 2026</span>
+                            <span id="live-indicator-badge" class="text-[10px] font-black px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                                <i class="fa-solid fa-signal animate-pulse"></i> CANLI YAYIN
+                            </span>
+                        </div>
+                        <span class="block text-[11px] text-slate-400 font-medium">Resmi Turnuva & Canlı Skor Takip Merkezi</span>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button onclick="openAdminAuth()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white transition shadow-lg">
+                        <i class="fa-solid fa-lock"></i>
+                        <span>Yönetici Paneli</span>
+                    </button>
+                </div>
+            </div>
+
+            <nav class="flex space-x-1 sm:space-x-2 border-t border-slate-800/80 overflow-x-auto py-1 scrollbar-none text-xs sm:text-sm font-medium">
+                <button onclick="switchTab('matches')" id="tab-btn-matches" class="tab-btn py-2 px-3 rounded-lg text-emerald-400 bg-emerald-950/40 border border-emerald-500/20 whitespace-nowrap transition flex items-center gap-1.5 font-semibold">
+                    <i class="fa-solid fa-gamepad"></i> Canlı Maç & Radar
+                </button>
+                <button onclick="switchTab('standings')" id="tab-btn-standings" class="tab-btn py-2 px-3 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 whitespace-nowrap transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-ranking-star"></i> Puan Durumu
+                </button>
+                <button onclick="switchTab('teams')" id="tab-btn-teams" class="tab-btn py-2 px-3 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 whitespace-nowrap transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-shield-halved"></i> Takımlar & Kadrolar (<span id="header-teams-count">2</span>)
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <section class="lg:col-span-7 space-y-4">
+            <div id="view-matches" class="tab-view block space-y-4">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center justify-between shadow-sm">
+                    <span class="font-bold text-sm text-white px-2">🏆 Canlı Fikstür & Karşılaşma</span>
+                    <span class="text-xs text-amber-400 font-semibold flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span> Gerçek Zamanlı Bağlantı
+                    </span>
+                </div>
+                <div id="matches-container" class="space-y-3"></div>
+            </div>
+
+            <div id="view-standings" class="tab-view hidden space-y-4">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                    <div class="p-4 border-b border-slate-800 bg-slate-900/90">
+                        <h2 class="font-bold text-base sm:text-lg text-white">Lig Puan Tablosu</h2>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs sm:text-sm">
+                            <thead class="bg-slate-950/80 text-slate-400 uppercase text-[10px] sm:text-xs font-semibold border-b border-slate-800">
+                                <tr>
+                                    <th class="py-3 px-3 text-center">#</th>
+                                    <th class="py-3 px-3">Takım</th>
+                                    <th class="py-3 px-2 text-center">O</th>
+                                    <th class="py-3 px-2 text-center">G</th>
+                                    <th class="py-3 px-2 text-center">B</th>
+                                    <th class="py-3 px-2 text-center">M</th>
+                                    <th class="py-3 px-2 text-center">AV</th>
+                                    <th class="py-3 px-3 text-center font-bold text-white bg-slate-800/40">P</th>
+                                </tr>
+                            </thead>
+                            <tbody id="standings-table-body" class="divide-y divide-slate-800/60 text-slate-300"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-teams" class="tab-view hidden space-y-4">
+                <div id="teams-list-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+            </div>
+        </section>
+
+        <aside class="lg:col-span-5 space-y-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden sticky top-20 shadow-2xl">
+                <div class="p-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <i class="fa-solid fa-satellite-dish text-emerald-400 animate-pulse"></i> Canlı Saha Radarı
+                    </span>
+                    <span id="selected-match-status-pill" class="px-2.5 py-0.5 rounded text-[11px] font-bold bg-slate-800 text-slate-300">
+                        Bağlanıyor...
+                    </span>
+                </div>
+                <div id="match-detail-panel" class="p-4 space-y-4"></div>
+            </div>
+        </aside>
+
+    </main>
+
+    <!-- ADMIN MODAL -->
+    <div id="admin-panel-modal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm hidden items-center justify-center p-3">
+        <div class="bg-slate-900 border border-slate-700 w-full max-w-lg rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h3 class="font-bold text-white text-base flex items-center gap-2">
+                    <i class="fa-solid fa-sliders text-amber-400"></i> Nexus Lig Yönetim Masası
+                </h3>
+                <button onclick="toggleAdminPanel()" class="text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Maç Ayarları -->
+            <div class="space-y-3 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                <span class="text-xs font-bold text-amber-400 uppercase">1. Maç Eşleşmesi ve Canlı Kontrol</span>
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                        <label class="text-slate-400 text-[10px] block mb-1">Ev Sahibi</label>
+                        <select id="admin-select-home" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-white"></select>
+                    </div>
+                    <div>
+                        <label class="text-slate-400 text-[10px] block mb-1">Deplasman</label>
+                        <select id="admin-select-away" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-white"></select>
+                    </div>
+                </div>
+                <button onclick="adminApplyMatchTeams()" class="w-full py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold text-white">Eşleşmeyi Güncelle</button>
+
+                <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800">
+                    <button onclick="adminScoreChange('home', 1)" class="p-2 bg-emerald-700 hover:bg-emerald-600 rounded text-xs font-bold text-white">⚽ Ev Sahibi +1 Gol</button>
+                    <button onclick="adminScoreChange('away', 1)" class="p-2 bg-blue-700 hover:bg-blue-600 rounded text-xs font-bold text-white">⚽ Dep. +1 Gol</button>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="adminScoreChange('home', -1)" class="p-1 bg-slate-800 hover:bg-slate-700 rounded text-xs text-slate-300">Ev -1 Gol Sil</button>
+                    <button onclick="adminScoreChange('away', -1)" class="p-1 bg-slate-800 hover:bg-slate-700 rounded text-xs text-slate-300">Dep -1 Gol Sil</button>
+                </div>
+                <div class="flex gap-2 pt-2">
+                    <input type="text" id="admin-comment-input" placeholder="Spiker canlı anlatımı..." class="flex-1 bg-slate-900 border border-slate-700 rounded px-2 text-xs text-white">
+                    <button onclick="adminAddCommentary()" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs font-bold text-white">Gönder</button>
+                </div>
+            </div>
+
+            <!-- Takım & Kadro Ekleme Formu -->
+            <div class="space-y-3 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                <span class="text-xs font-bold text-emerald-400 uppercase">2. Yeni Takım & İlk 11 Ekle</span>
+                <div class="grid grid-cols-3 gap-2 text-xs">
+                    <input type="text" id="new-team-name" placeholder="Takım Adı (Örn: Boğalar)" class="col-span-2 bg-slate-900 border border-slate-700 rounded p-1.5 text-white">
+                    <input type="text" id="new-team-logo" placeholder="Logo (Örn: 🐂)" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-white text-center">
+                </div>
+                <div>
+                    <label class="text-[10px] text-slate-400 block mb-1">İlk 11 Oyuncuları (Virgülle veya alt alta yazın):</label>
+                    <textarea id="new-team-players" rows="3" placeholder="Ahmet (K), Mehmet (D), Can (D), Ali (D), Veli (D), Arda (O), Emre (O), Burak (O), Kerem (F), Cenk (F), Semih (F)" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-xs text-white"></textarea>
+                </div>
+                <button onclick="adminAddNewTeam()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-xs font-bold text-white">
+                    <i class="fa-solid fa-plus"></i> Takımı ve Kadroyu Kaydet
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* ==========================================
+           FIREBASE REALTIME YAPILANDIRMASI
+           ========================================== */
+        const firebaseConfig = {
+            databaseURL: "https://nexus-ligi-default-rtdb.firebaseio.com" // Kendi Firebase URL'ini bağlayabilirsin
+        };
+
+        let db = null;
+        let isOnline = false;
+
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.database();
+            isOnline = true;
+        } catch (e) {
+            console.log("Yerel mod devrede.");
+        }
+
+        /* Başlangıç Takımları */
+        let teams = [
+            {
+                id: "t_1",
+                name: "Anadolu Aslanları",
+                logo: "🦁",
+                players: [
+                    { name: "Mert", role: "K", rating: 85 },
+                    { name: "Burak", role: "D", rating: 80 },
+                    { name: "Kaan", role: "D", rating: 84 },
+                    { name: "Emre", role: "D", rating: 82 },
+                    { name: "Can", role: "D", rating: 81 },
+                    { name: "Alperen", role: "O", rating: 84 },
+                    { name: "Barış", role: "O", rating: 86 },
+                    { name: "Arda", role: "O", rating: 88 },
+                    { name: "Kerem", role: "F", rating: 87 },
+                    { name: "Yiğit", role: "F", rating: 89 },
+                    { name: "Batuhan", role: "F", rating: 85 }
+                ]
+            },
+            {
+                id: "t_2",
+                name: "Kuzey Yıldızı SK",
+                logo: "⭐",
+                players: [
+                    { name: "Volkan", role: "K", rating: 84 },
+                    { name: "Serdar", role: "D", rating: 81 },
+                    { name: "Tolga", role: "D", rating: 83 },
+                    { name: "Deniz", role: "D", rating: 80 },
+                    { name: "Uğur", role: "D", rating: 79 },
+                    { name: "Hakan", role: "O", rating: 83 },
+                    { name: "Selim", role: "O", rating: 82 },
+                    { name: "Oğuz", role: "O", rating: 85 },
+                    { name: "Tayfun", role: "O", rating: 86 },
+                    { name: "Berk", role: "F", rating: 84 },
+                    { name: "Eren", role: "F", rating: 88 }
+                ]
+            }
+        ];
+
+        /* Maç Durumu */
+        let liveMatch = {
+            homeId: "t_1",
+            awayId: "t_2",
+            homeScore: 0,
+            awayScore: 0,
+            minute: 0,
+            status: "upcoming",
+            ballPos: { x: 50, y: 50, zoneText: "Maç Başlamadı" },
+            commentary: []
+        };
+
+        let liveTimer = null;
+        let lastHomeScore = 0;
+        let lastAwayScore = 0;
+
+        // Anlık Firebase Dinleyicisi
+        if (isOnline && db) {
+            db.ref('nexusState').on('value', (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    if (data.teams) teams = data.teams;
+                    if (data.liveMatch) {
+                        // Gol atıldıysa ses ve konfeti patlat
+                        if (data.liveMatch.homeScore > lastHomeScore || data.liveMatch.awayScore > lastAwayScore) {
+                            triggerGoalEffect();
+                        }
+                        lastHomeScore = data.liveMatch.homeScore;
+                        lastAwayScore = data.liveMatch.awayScore;
+                        liveMatch = data.liveMatch;
+                    }
+                    renderAll();
+                }
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            renderAll();
+            populateTeamSelects();
+        });
+
+        function syncData() {
+            if (isOnline && db) {
+                db.ref('nexusState').set({
+                    teams: teams,
+                    liveMatch: liveMatch
+                });
+            }
+            renderAll();
+        }
+
+        function triggerGoalEffect() {
+            try {
+                const audio = new Audio("https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3");
+                audio.play();
+            } catch(e){}
+            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+        }
+
+        function getTeam(id) {
+            return teams.find(t => t.id === id) || teams[0] || { name: 'Bilinmiyor', logo: '⚽', players: [] };
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-view').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.className = "tab-btn py-2 px-3 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 whitespace-nowrap transition flex items-center gap-1.5";
+            });
+
+            const activeView = document.getElementById(`view-${tabId}`);
+            const activeBtn = document.getElementById(`tab-btn-${tabId}`);
+            if (activeView) activeView.classList.remove('hidden');
+            if (activeBtn) {
+                activeBtn.className = "tab-btn py-2 px-3 rounded-lg text-emerald-400 bg-emerald-950/40 border border-emerald-500/20 whitespace-nowrap transition flex items-center gap-1.5 font-semibold";
+            }
+        }
+
+        function renderAll() {
+            document.getElementById('header-teams-count').innerText = teams.length;
+            renderMatches();
+            renderStandings();
+            renderTeams();
+            renderMatchDetail();
+        }
+
+        function renderMatches() {
+            const container = document.getElementById('matches-container');
+            const home = getTeam(liveMatch.homeId);
+            const away = getTeam(liveMatch.awayId);
+
+            container.innerHTML = `
+                <div class="rounded-xl p-4 border bg-slate-900 border-slate-800 shadow-lg">
+                    <div class="flex items-center justify-between text-xs text-slate-400 pb-2 mb-3 border-b border-slate-800">
+                        <span>⚽ Turnuva Maçı</span>
+                        <div>
+                            ${liveMatch.status === 'live' 
+                                ? `<span class="bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500 live-dot"></span>${liveMatch.minute}' CANLI</span>`
+                                : liveMatch.status === 'finished' ? '<span class="bg-slate-800 px-2 py-0.5 rounded text-slate-300 font-bold">MS (Bitti)</span>' : '<span class="text-emerald-400 font-bold">Başlamadı</span>'
+                            }
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-12 items-center gap-2">
+                        <div class="col-span-5 flex items-center justify-end gap-2 text-right">
+                            <span class="font-bold text-sm text-white">${home.name}</span>
+                            <div class="w-8 h-8 rounded-full flex items-center justify-center text-base bg-amber-500/20 text-amber-400 border border-amber-500/40">${home.logo}</div>
+                        </div>
+                        <div class="col-span-2 text-center py-2 bg-slate-950 rounded-lg font-mono font-black text-lg text-emerald-400 border border-slate-800">
+                            ${liveMatch.homeScore} - ${liveMatch.awayScore}
+                        </div>
+                        <div class="col-span-5 flex items-center justify-start gap-2 text-left">
+                            <div class="w-8 h-8 rounded-full flex items-center justify-center text-base bg-sky-500/20 text-sky-400 border border-sky-500/40">${away.logo}</div>
+                            <span class="font-bold text-sm text-white">${away.name}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderMatchDetail() {
+            const panel = document.getElementById('match-detail-panel');
+            const pill = document.getElementById('selected-match-status-pill');
+            const home = getTeam(liveMatch.homeId);
+            const away = getTeam(liveMatch.awayId);
+
+            if (liveMatch.status === 'live') {
+                pill.className = "px-2.5 py-0.5 rounded text-[11px] font-bold bg-red-600 text-white flex items-center gap-1.5";
+                pill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-white live-dot"></span> Canlı (${liveMatch.minute}')`;
+            } else if (liveMatch.status === 'finished') {
+                pill.className = "px-2.5 py-0.5 rounded text-[11px] font-bold bg-slate-800 text-slate-300";
+                pill.innerText = "Maç Bitti";
+            } else {
+                pill.className = "px-2.5 py-0.5 rounded text-[11px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800";
+                pill.innerText = "Bekliyor";
+            }
+
+            panel.innerHTML = `
+                <div class="bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-center">
+                    <div class="flex items-center justify-between">
+                        <div class="w-2/5 text-center">
+                            <div class="text-2xl">${home.logo}</div>
+                            <span class="font-bold text-xs text-white block mt-1 truncate">${home.name}</span>
+                        </div>
+                        <div class="w-1/5">
+                            <div class="text-3xl font-black font-mono text-emerald-400">${liveMatch.homeScore} - ${liveMatch.awayScore}</div>
+                            <span class="text-[10px] text-slate-500 uppercase font-bold">${liveMatch.minute}' Dk</span>
+                        </div>
+                        <div class="w-2/5 text-center">
+                            <div class="text-2xl">${away.logo}</div>
+                            <span class="font-bold text-xs text-white block mt-1 truncate">${away.name}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-1">
+                    <div class="flex justify-between text-[11px] text-slate-400">
+                        <span>Aksiyon: <strong class="text-white">${liveMatch.ballPos ? liveMatch.ballPos.zoneText : 'Orta Saha'}</strong></span>
+                    </div>
+                    <div class="soccer-pitch w-full h-32 rounded-xl border-2 border-emerald-600/60 overflow-hidden relative shadow-inner">
+                        <div class="absolute inset-y-0 left-1/2 w-0.5 bg-white/40 -translate-x-1/2"></div>
+                        <div class="absolute top-1/2 left-1/2 w-12 h-12 border border-white/40 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
+                        <div class="ball-point absolute w-4 h-4 bg-amber-400 border-2 border-white rounded-full shadow-lg -translate-x-1/2 -translate-y-1/2 flex items-center justify-center text-[8px]" style="left: ${liveMatch.ballPos?.x || 50}%; top: ${liveMatch.ballPos?.y || 50}%;">⚽</div>
+                    </div>
+                </div>
+
+                <div class="space-y-1.5">
+                    <span class="text-xs font-bold text-slate-300 uppercase flex items-center gap-1"><i class="fa-solid fa-microphone-lines text-emerald-400"></i> Anlatım Akışı</span>
+                    <div class="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                        ${liveMatch.commentary && liveMatch.commentary.length > 0 ? liveMatch.commentary.map(c => `
+                            <div class="p-2 rounded bg-slate-950 border border-slate-800 text-xs flex items-start gap-2">
+                                <span class="font-mono font-bold text-emerald-400">${c.minute}'</span>
+                                <span class="text-slate-200">${c.text}</span>
+                            </div>
+                        `).slice(0, 5).map(x => x).join('') : '<p class="text-xs text-slate-500 italic py-2 text-center">Henüz anlatım girilmedi.</p>'}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderStandings() {
+            const tbody = document.getElementById('standings-table-body');
+            tbody.innerHTML = teams.map((t, idx) => `
+                <tr class="hover:bg-slate-800/40">
+                    <td class="py-2.5 px-3 text-center font-bold">${idx + 1}</td>
+                    <td class="py-2.5 px-3 font-bold text-white flex items-center gap-2">${t.logo} ${t.name}</td>
+                    <td class="py-2.5 px-2 text-center font-mono">1</td>
+                    <td class="py-2.5 px-2 text-center font-mono text-emerald-400">0</td>
+                    <td class="py-2.5 px-2 text-center font-mono text-amber-400">0</td>
+                    <td class="py-2.5 px-2 text-center font-mono text-red-400">0</td>
+                    <td class="py-2.5 px-2 text-center font-mono">0</td>
+                    <td class="py-2.5 px-3 text-center font-mono font-black text-white bg-slate-800/30">0</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderTeams() {
+            const grid = document.getElementById('teams-list-grid');
+            grid.innerHTML = teams.map(t => `
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div class="flex items-center gap-2 border-b border-slate-800 pb-2">
+                        <span class="text-2xl">${t.logo}</span>
+                        <h4 class="font-bold text-white text-base">${t.name} (${t.players.length} Oyuncu)</h4>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1.5 text-xs font-mono text-slate-300">
+                        ${t.players.map(p => `
+                            <div class="flex justify-between bg-slate-950 p-1.5 rounded border border-slate-800">
+                                <span>${p.name} (${p.role || 'O'})</span>
+                                <span class="text-emerald-400 font-bold">${p.rating || 80}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function populateTeamSelects() {
+            const hSel = document.getElementById('admin-select-home');
+            const aSel = document.getElementById('admin-select-away');
+            if (!hSel || !aSel) return;
+
+            const opts = teams.map(t => `<option value="${t.id}">${t.logo} ${t.name}</option>`).join('');
+            hSel.innerHTML = opts;
+            aSel.innerHTML = opts;
+
+            hSel.value = liveMatch.homeId;
+            aSel.value = liveMatch.awayId;
+        }
+
+        /* YÖNETİCİ İŞLEMLERİ */
+        function openAdminAuth() {
+            const pass = prompt("Yönetici Şifresini Giriniz:");
+            if (pass === "nexus2026") {
+                toggleAdminPanel();
+            } else if (pass !== null) {
+                alert("Hatalı şifre!");
+            }
+        }
+
+        function toggleAdminPanel() {
+            const modal = document.getElementById('admin-panel-modal');
+            modal.classList.toggle('hidden');
+            modal.classList.toggle('flex');
+            populateTeamSelects();
+        }
+
+        function adminApplyMatchTeams() {
+            liveMatch.homeId = document.getElementById('admin-select-home').value;
+            liveMatch.awayId = document.getElementById('admin-select-away').value;
+            syncData();
+            alert("Maç eşleşmesi güncellendi!");
+        }
+
+        function adminAddNewTeam() {
+            const name = document.getElementById('new-team-name').value.trim();
+            const logo = document.getElementById('new-team-logo').value.trim() || '⚽';
+            const playersRaw = document.getElementById('new-team-players').value.trim();
+
+            if (!name) { alert("Lütfen takım adı girin."); return; }
+
+            let playerList = [];
+            if (playersRaw) {
+                const parts = playersRaw.split(/[,\n]+/);
+                playerList = parts.filter(p => p.trim().length > 0).map((pStr, i) => {
+                    return { name: pStr.trim(), role: i === 0 ? "K" : i < 5 ? "D" : i < 9 ? "O" : "F", rating: Math.floor(Math.random() * 10) + 80 };
+                });
+            } else {
+                for (let i = 1; i <= 11; i++) {
+                    playerList.push({ name: `Oyuncu ${i}`, role: i === 1 ? "K" : "O", rating: 80 });
+                }
+            }
+
+            const newTeam = {
+                id: "t_" + Date.now(),
+                name: name,
+                logo: logo,
+                players: playerList
+            };
+
+            teams.push(newTeam);
+            syncData();
+            populateTeamSelects();
+            document.getElementById('new-team-name').value = '';
+            document.getElementById('new-team-players').value = '';
+            alert(`${name} başarıyla lige eklendi!`);
+        }
+
+        function adminScoreChange(side, delta) {
+            if (side === 'home') liveMatch.homeScore = Math.max(0, liveMatch.homeScore + delta);
+            if (side === 'away') liveMatch.awayScore = Math.max(0, liveMatch.awayScore + delta);
+            
+            if (delta > 0) {
+                const team = getTeam(side === 'home' ? liveMatch.homeId : liveMatch.awayId);
+                liveMatch.commentary.unshift({ minute: liveMatch.minute || 1, text: `⚽ GOOOOL! ${team.name} golü buldu! (${liveMatch.homeScore}-${liveMatch.awayScore})` });
+            }
+            syncData();
+        }
+
+        function adminAddCommentary() {
+            const input = document.getElementById('admin-comment-input');
+            const text = input.value.trim();
+            if (text) {
+                liveMatch.commentary.unshift({ minute: liveMatch.minute || 1, text: text });
+                input.value = '';
+                syncData();
+            }
+        }
+    </script>
+</body>
+</html>
